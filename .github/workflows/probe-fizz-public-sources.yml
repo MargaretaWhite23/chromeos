@@ -1,0 +1,27 @@
+name: Probe public Fizz R150 sysroot prerequisites
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-fizz-public-sources.yml'
+      - 'scripts/probe-fizz-public-sources.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  public-source-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe public R150 branch and Fizz overlay
+        run: bash scripts/probe-fizz-public-sources.sh
+      - name: Publish evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-r150-public-source-probe
+          path: reports/
+          if-no-files-found: warn
