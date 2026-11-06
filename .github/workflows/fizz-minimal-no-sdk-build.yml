@@ -1,0 +1,35 @@
+name: Fizz minimal no-SDK build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fizz-minimal-no-sdk-build.yml'
+      - 'scripts/inventory-fizz-public-artifacts.py'
+      - 'scripts/build-fizz-minimal-no-sdk.sh'
+      - 'tests/fizz-hello.c'
+
+permissions:
+  contents: read
+
+jobs:
+  minimal-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install standalone host compiler and ELF utilities
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang lld binutils file
+      - name: Discover public ChromiumOS artifacts and compile standalone smoke test
+        run: timeout --signal=TERM --kill-after=15s 8m bash scripts/build-fizz-minimal-no-sdk.sh
+      - name: Upload build binary and diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-minimal-no-sdk-host-abi
+          path: |
+            output/
+            reports/
+          if-no-files-found: warn
