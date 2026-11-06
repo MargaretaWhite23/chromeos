@@ -9,7 +9,7 @@ The manually initiated end-to-end test has already been verified in [run 4230610
 
 - GitHub Actions builds daily at 03:17 UTC, on pushes affecting the workflow, and via manual dispatch. CI runs syntax/stdlib tests; it **cannot** claim actual ChromeOS execution.
 - Crostini's systemd **user** timer polls completed successful `main` workflow runs every five minutes, choosing the most recent run. It uses the authenticated `gh` CLI and the existing SHA-256-verifying staging script. It writes one JSON request under shared Downloads (`fizz-automation/requests/run-<ID>.json`). State persists under `~/.local/state/fizz-automation/state.json`. An exclusive local lock avoids duplicate polls. Intermediate failures retain state and retry.
-- ChromeOS worker `scripts/fizz-host-worker.py` polls requests (default every 30 seconds), checks the requested binary name, run ID and hashes, and invokes the root-owned, already installed `/usr/local/fizz-testing/fizz-test-on-chromeos.sh`. That script copies the binary into an executable directory and executes the **binary as chronos**, not root. The worker writes a run-specific JSON result in `fizz-automation/results`.
+- ChromeOS worker `scripts/fizz-host-worker.py` runs **entirely as chronos (UID 1000)** and polls requests (default every 30 seconds). It checks the requested binary name, run ID and hashes; copies the verified artifact into a private chronos-owned executable directory under `/usr/local/fizz-testing/chronos-run`; and executes it without sudo. The worker writes a run-specific JSON result in `fizz-automation/results`. The existing root-owned interactive host-test shell script is left untouched.
 - Crostini reads a matching host result and attempts to publish a GitHub commit status under `fizz/real-chromeos-host`. This depends on GitHub CLI credentials having commit-status write permission. If publication fails, the result remains in the local state and is retried. A GitHub-hosted build success is never itself reported as a real ChromeOS pass.
 
 ## Setup on Crostini — using bridge `[vin]`
@@ -38,11 +38,14 @@ sha256sum "$HOME/chromeos/scripts/fizz-host-worker.py" /mnt/chromeos/MyFiles/Dow
 test -f /home/chronos/user/MyFiles/Downloads/fizz-host-worker.py
 cp /home/chronos/user/MyFiles/Downloads/fizz-host-worker.py /usr/local/fizz-testing/fizz-host-worker.py
 chmod 755 /usr/local/fizz-testing/fizz-host-worker.py
+mkdir -p /usr/local/fizz-testing/chronos-run
+chown chronos:chronos /usr/local/fizz-testing/chronos-run
+chmod 700 /usr/local/fizz-testing/chronos-run
 /usr/local/bin/python3 -m py_compile /usr/local/fizz-testing/fizz-host-worker.py
-/usr/local/bin/python3 /usr/local/fizz-testing/fizz-host-worker.py --once
+sudo -n -u chronos /usr/local/bin/python3 /usr/local/fizz-testing/fizz-host-worker.py --once
 ```
 
-**Do not start the long-lived host worker until the host test is confirmed.** Once validated and approved, it can be launched as a detached session process, with a PID/log under `/usr/local/fizz-testing`. ChromeOS uses Upstart; installing a persistent Upstart job is **not** implemented because the host's writable init job search path is not yet established and the root filesystem may be read-only. A detached worker does not survive reboot.
+**Do not start the long-lived host worker until the host test is confirmed.** Once validated, it can be launched as a detached session process **as chronos**, with a log under `/usr/local/fizz-testing/chronos-run`. ChromeOS uses Upstart; installing a persistent Upstart job is **not** implemented because the host's writable init job search path is not yet established and the root filesystem may be read-only. A detached worker does not survive reboot.
 
 ## Troubleshooting
 
@@ -56,9 +59,9 @@ chmod 755 /usr/local/fizz-testing/fizz-host-worker.py
 
 ## Security boundary
 
-This is intentionally **not a general-purpose remote shell** and it opens no TCP port. Binary name is fixed to `fizz-runtime-capabilities`; requests are strict JSON; no request-supplied executable path or shell command is accepted. The installed host-test script must be root-owned and not group/other writable. The tested executable runs as UID/EUID 1000 with no effective Linux capabilities, within the observed SELinux context `u:r:cros_browser:s0`.
+This is intentionally **not a general-purpose remote shell** and it opens no TCP port. Binary name is fixed to `fizz-runtime-capabilities`; requests are strict JSON; no request-supplied executable path or shell command is accepted. The worker never needs root: its persistent process and tested executable both run as chronos UID/EUID 1000. Its executable workspace must be owned by chronos and mode 0700. Prior interactive tests observed no effective Linux capabilities and SELinux context `u:r:cros_browser:s0`; the new unattended launch path must be verified separately.
 
-However, the shared Downloads directory is writable by Crostini/chronos. A party able to alter both an artifact and its accompanying SHA-256 can request execution of arbitrary machine code **as chronos**. SHA-256 is transfer integrity, **not publisher authentication**. GitHub statuses derived from files in this shared directory can also be spoofed by local writers. Keep this test system confined to trusted local accounts. Before treating this as a production security boundary, add independent signed artifact provenance verified on the host and authenticated result reporting. Do not run with privileged user-supplied shell commands, add a network listener, or weaken ChromeOS mount/SELinux policy.
+However, the shared Downloads directory is writable by Crostini/chronos. A party able to alter both an artifact and its accompanying SHA-256 can request execution of arbitrary machine code **as chronos**, but not through a root runner. SHA-256 is transfer integrity, **not publisher authentication**. GitHub statuses derived from files in this shared directory can also be spoofed by local writers. Keep this test system confined to trusted local accounts. Before treating this as a production security boundary, add independent signed artifact provenance verified on the host and authenticated result reporting. Do not run with privileged user-supplied shell commands, add a network listener, or weaken ChromeOS mount/SELinux policy.
 
 ## Disable
 
