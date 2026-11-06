@@ -1,0 +1,27 @@
+name: Audit exact Fizz buildspec pinned commits
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/audit-fizz-pinned-projects.yml'
+      - 'scripts/audit-fizz-pinned-projects.py'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-pinned-commits:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check sampled pinned Gitiles commits
+        run: python3 scripts/audit-fizz-pinned-projects.py
+      - name: Upload report even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-pinned-project-audit
+          path: reports/
+          if-no-files-found: warn
