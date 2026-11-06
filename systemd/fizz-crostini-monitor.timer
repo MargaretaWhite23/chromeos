@@ -1,0 +1,12 @@
+[Unit]
+Description=Check GitHub Actions Fizz build results every five minutes (while Crostini is running)
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+AccuracySec=30s
+RandomizedDelaySec=10s
+Unit=fizz-crostini-monitor.service
+
+[Install]
+WantedBy=timers.target
