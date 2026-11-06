@@ -27,6 +27,12 @@ python3 scripts/audit-fizz-static-elf.py --binary output/fizz-static-probe --out
 python3 tests/test-fizz-static-probe.py
 echo "STATIC_MUSL_BUILD_PASS"
 echo "STATIC_MUSL_CHROMEOS_FIZZ_NOT_TESTED"
+echo "=== STATIC RUNTIME CAPABILITIES PROBE ==="
+musl-gcc -O2 -static -Wall -Wextra -Werror -o output/fizz-runtime-capabilities tests/fizz-runtime-capabilities.c
+sha256sum output/fizz-runtime-capabilities > reports/runtime-capabilities-sha256.txt
+python3 scripts/audit-fizz-static-elf.py --binary output/fizz-runtime-capabilities --output reports/fizz-runtime-capabilities-elf-audit.json
+python3 tests/test-fizz-runtime-capabilities.py
+echo "FIZZ_RUNTIME_CAPABILITIES_CI_PASS"
 echo "=== EXECUTE ON BUILD RUNNER (NOT CHROMEOS TARGET) ==="
 output/fizz-hello-host-abi
 echo "HOST_ABI_SMOKE_BUILD_PASS"
