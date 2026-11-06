@@ -1,0 +1,35 @@
+name: Audit Fizz R150 manifest dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/audit-fizz-manifest.yml'
+      - 'scripts/audit-fizz-manifest.py'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve public ChromiumOS R150 manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          git ls-remote --exit-code https://chromium.googlesource.com/chromiumos/manifest refs/heads/release-R150-16700.B | tee reports/manifest-ref.txt
+          git clone --depth 1 --single-branch --branch release-R150-16700.B https://chromium.googlesource.com/chromiumos/manifest public-manifest
+          git -C public-manifest rev-parse HEAD | tee reports/manifest-commit.txt
+      - name: Audit manifest includes and public metadata
+        run: python3 scripts/audit-fizz-manifest.py
+      - name: Publish findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-r150-manifest-audit
+          path: reports/
+          if-no-files-found: warn
