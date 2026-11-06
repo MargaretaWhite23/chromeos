@@ -125,7 +125,9 @@ def one_cycle(spool, state_path, allow_publish=True):
             passed = (
                 result.get("exit_code") == 0
                 and result.get("passed") is True
-                and "FIZZ_HOST_TEST_PASS" in result.get("stdout", "")
+                and "FIZZ_RUNTIME_CAPABILITIES_COMPLETE" in result.get("stdout", "")
+                and "RUNTIME_UID=1000" in result.get("stdout", "")
+                and "RUNTIME_EUID=1000" in result.get("stdout", "")
             )
             status = "success" if passed else "failure"
             if allow_publish:
