@@ -19,6 +19,7 @@ NAME = "fizz-runtime-capabilities"
 HOST_SCRIPT = Path("/usr/local/fizz-testing/fizz-test-on-chromeos.sh")
 SPOOL = Path("/home/chronos/user/MyFiles/Downloads/fizz-automation")
 SHA64 = re.compile(r"^[a-f0-9]{64}$")
+SHA40 = re.compile(r"^[a-f0-9]{40}$")
 REQUEST_FILE = re.compile(r"^run-([1-9][0-9]*)\.json$")
 
 
@@ -31,7 +32,7 @@ def valid_request(obj):
         and isinstance(obj.get("sha256"), str)
         and SHA64.fullmatch(obj["sha256"]) is not None
         and isinstance(obj.get("head_sha"), str)
-        and SHA64.fullmatch(obj["head_sha"]) is not None
+        and SHA40.fullmatch(obj["head_sha"]) is not None
     )
 
 
