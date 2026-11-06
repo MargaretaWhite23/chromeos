@@ -16,6 +16,8 @@ clang -O2 -fuse-ld=lld -Wall -Wextra -Werror -o output/fizz-hello-host-abi tests
 file output/fizz-hello-host-abi | tee reports/compiled-binary.txt
 readelf -h -l -d output/fizz-hello-host-abi > reports/compiled-elf.txt
 sha256sum output/fizz-hello-host-abi > reports/compiled-sha256.txt
+echo "=== ELF ABI AUDIT ==="
+python3 scripts/audit-fizz-elf-abi.py --binary output/fizz-hello-host-abi --output reports/fizz-elf-abi-audit.json
 echo "=== EXECUTE ON BUILD RUNNER (NOT CHROMEOS TARGET) ==="
 output/fizz-hello-host-abi
 echo "HOST_ABI_SMOKE_BUILD_PASS"
