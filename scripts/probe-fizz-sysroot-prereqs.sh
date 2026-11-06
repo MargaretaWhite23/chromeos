@@ -7,6 +7,9 @@ trap 'rc=$?; printf "EXIT_CODE=%s\n" "$rc" > "$ROOT/reports/sysroot-preflight-ex
 
 echo "=== REPEAT VERIFIED EXACT-BUILDSPEC CHECKOUT ==="
 bash scripts/checkout-fizz-pinned.sh
+# Child shells cannot export PATH back to parent; reuse downloaded repo launcher.
+export PATH="$HOME/bin:$PATH"
+command -v repo
 
 echo "=== SELECT PINNED CROSUTILS PROJECT ==="
 PROJECT="$(python3 - <<'PY'
