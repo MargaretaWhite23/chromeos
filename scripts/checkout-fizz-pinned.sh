@@ -6,7 +6,7 @@ mkdir -p reports checkout
 ROOT="$PWD"
 LOG="$ROOT/reports/checkout.log"
 exec > >(tee -a "$LOG") 2>&1
-trap 'rc=$?; echo "EXIT_CODE=$rc"; df -h .; du -sh checkout 2>/dev/null || true; printf "%s\n" "$rc" > reports/exit-code.txt' EXIT
+trap 'rc=$?; echo "EXIT_CODE=$rc"; df -h .; du -sh "$ROOT/checkout" 2>/dev/null || true; printf "%s\n" "$rc" > "$ROOT/reports/exit-code.txt"' EXIT
 echo "=== HOST CAPACITY ==="
 df -h .; free -h; git --version; python3 --version
 echo "=== FETCH PINNED PUBLIC BUILDSPEC ==="
