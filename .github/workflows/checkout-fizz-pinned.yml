@@ -1,0 +1,35 @@
+name: Bounded Fizz pinned source checkout
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/checkout-fizz-pinned.yml'
+      - 'scripts/checkout-fizz-pinned.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-pinned:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Limit checkout to 12 GiB of workspace usage
+        run: |
+          set -euo pipefail
+          df -h .
+          mkdir -p reports
+          echo "Runner free space is reported before and after sync."
+      - name: Initialize pinned manifest and sync selected projects
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=30s 13m bash scripts/checkout-fizz-pinned.sh
+      - name: Upload checkout diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-bounded-checkout
+          path: reports/
+          if-no-files-found: warn
