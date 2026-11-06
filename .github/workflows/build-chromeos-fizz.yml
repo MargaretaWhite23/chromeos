@@ -1,0 +1,104 @@
+name: Build ChromeOS Fizz binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      sysroot_url:
+        description: 'HTTPS URL of a trusted Fizz ChromeOS 150 (16700.66.0) sysroot tar.gz/tar.xz'
+        required: true
+        type: string
+      sysroot_sha256:
+        description: 'Expected SHA-256 of the sysroot archive (64 hex characters)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_BOARD: fizz
+      EXPECTED_VERSION: '16700.66.0'
+      SYSROOT_DIR: ${{ github.workspace }}/.sysroot
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required sysroot inputs and availability
+        shell: bash
+        env:
+          SYSROOT_URL: ${{ inputs.sysroot_url }}
+          SYSROOT_SHA256: ${{ inputs.sysroot_sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SYSROOT_URL" =~ ^https:// ]]; then
+            echo "::error::A trusted HTTPS Fizz ChromeOS 150 sysroot URL is required; no Ubuntu or generic-board fallback is permitted."
+            exit 1
+          fi
+          if [[ ! "$SYSROOT_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Supply the expected 64-character SHA-256 for the Fizz sysroot archive."
+            exit 1
+          fi
+          echo "Checking sysroot availability (HTTP HEAD/GET as supported by server)..."
+          if ! curl --fail --location --silent --show-error --retry 2 --connect-timeout 15 --max-time 120 \
+              --output /dev/null --range 0-0 "$SYSROOT_URL"; then
+            echo "::error::Fizz ChromeOS 150 sysroot is unavailable or inaccessible at the supplied URL. No fallback will be used."
+            exit 1
+          fi
+      - name: Download and verify Fizz sysroot
+        shell: bash
+        env:
+          SYSROOT_URL: ${{ inputs.sysroot_url }}
+          SYSROOT_SHA256: ${{ inputs.sysroot_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$SYSROOT_DIR"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 1200 \
+            --output "$RUNNER_TEMP/fizz-sysroot.tar" "$SYSROOT_URL"
+          printf '%s  %s\n' "$SYSROOT_SHA256" "$RUNNER_TEMP/fizz-sysroot.tar" | sha256sum -c -
+          tar -tf "$RUNNER_TEMP/fizz-sysroot.tar" > "$RUNNER_TEMP/sysroot-files.txt"
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' "$RUNNER_TEMP/sysroot-files.txt"; then
+            echo "::error::Unsafe sysroot archive paths detected"; exit 1
+          fi
+          tar -xf "$RUNNER_TEMP/fizz-sysroot.tar" -C "$SYSROOT_DIR" --no-same-owner
+          if [[ ! -f "$SYSROOT_DIR/usr/include/stdio.h" ]] ||
+             [[ ! -f "$SYSROOT_DIR/usr/include/features.h" ]]; then
+            echo "::error::Archive does not contain a usable sysroot at its root (expected usr/include/stdio.h and features.h)."; exit 1
+          fi
+          if [[ ! -f "$SYSROOT_DIR/lib64/libc.so.6" &&
+                ! -f "$SYSROOT_DIR/usr/lib64/libc.so.6" &&
+                ! -f "$SYSROOT_DIR/lib/x86_64-linux-gnu/libc.so.6" ]]; then
+            echo "::error::Sysroot lacks a target glibc runtime; refusing host-library fallback."; exit 1
+          fi
+          if [[ ! -e "$SYSROOT_DIR/usr/lib64/crt1.o" &&
+                ! -e "$SYSROOT_DIR/usr/lib/crt1.o" &&
+                ! -e "$SYSROOT_DIR/usr/lib/x86_64-linux-gnu/crt1.o" ]]; then
+            echo "::error::Sysroot lacks crt1.o required for native executable linking."; exit 1
+          fi
+          echo "Sysroot structural checks passed; version/board provenance must be established by the supplied trusted archive."
+      - name: Compile against Fizz sysroot only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          clang --version | head -1
+          clang --target=x86_64-linux-gnu --sysroot="$SYSROOT_DIR" \
+            -O2 -Wall -Wextra -Werror -fuse-ld=lld \
+            -o dist/chromeos-hello examples/hello.c
+          file dist/chromeos-hello
+          readelf -h dist/chromeos-hello | grep -E 'Class:|Machine:'
+          readelf -l dist/chromeos-hello | grep 'Requesting program interpreter' || true
+          readelf --version-info dist/chromeos-hello > dist/elf-versions.txt
+          readelf -d dist/chromeos-hello > dist/elf-dynamic.txt
+          if readelf --version-info dist/chromeos-hello | grep -q 'GLIBC_2\.4[2-9]\|GLIBC_2\.[5-9]'; then
+            echo "::error::Binary requests a glibc symbol newer than target 2.41"; exit 1
+          fi
+          printf 'board=fizz\nchromeos_version=16700.66.0\nsource=provided sysroot (SHA-256 verified)\n' > dist/target.txt
+          sha256sum dist/chromeos-hello > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: chromeos-fizz-150-x86_64
+          path: dist/
+          if-no-files-found: error
