@@ -2,8 +2,7 @@
 
 ## Status
 
-**Implementation candidate, not yet proven unattended on the real host.**
-The manually initiated end-to-end test has already been verified in [run 42306108497](https://github.com/MargaretaWhite23/chromeos/actions/runs/42306108497) and the [verification report](fizz-end-to-end-verified-42306108497.md).
+**Verified on the real ChromeOS Fizz host on 2026-11-06.** The GitHub Actions [post-merge run 42307539843](https://github.com/MargaretaWhite23/chromeos/actions/runs/42307539843) completed successfully, its artifact was staged by the Crostini monitor, the host worker executed it as `chronos`, and the monitor published GitHub commit status `fizz/real-chromeos-host: success` for commit `6f3bcf3a11a43d18a876bc6b8d39e77260127279`. This verifies one complete end-to-end cycle; subsequent builds and reboot recovery are not yet demonstrated. The earlier manual test is documented in [run 42306108497](https://github.com/MargaretaWhite23/chromeos/actions/runs/42306108497) and the [verification report](fizz-end-to-end-verified-42306108497.md).
 
 ## Design
 
@@ -45,7 +44,17 @@ chmod 700 /usr/local/fizz-testing/chronos-run
 sudo -n -u chronos /usr/local/bin/python3 /usr/local/fizz-testing/fizz-host-worker.py --once
 ```
 
-**Do not start the long-lived host worker until the host test is confirmed.** Once validated, it can be launched as a detached session process **as chronos**, with a log under `/usr/local/fizz-testing/chronos-run`. ChromeOS uses Upstart; installing a persistent Upstart job is **not** implemented because the host's writable init job search path is not yet established and the root filesystem may be read-only. A detached worker does not survive reboot.
+The first real-host test has passed. The long-lived worker has subsequently been started **as chronos**, polling every 30 seconds. Observed process PID `713182` (ephemeral; do not rely on this PID after restart), command `/usr/lib/python-exec/python3.11/python3 /usr/local/fizz-testing/fizz-host-worker.py --interval 30`, and log lines `FIZZ_HOST_WORKER_STARTED` and repeated `FIZZ_HOST_NO_PENDING_REQUEST`. The worker is launched with `nohup` and a PID file at `/usr/local/fizz-testing/chronos-run/worker.pid`; the log is `worker.log` in that directory. This is **session persistence, not reboot persistence**. ChromeOS uses Upstart; a dedicated auto-start/restart job has **not** been installed because the writable init job search path is not yet established and the root filesystem may be read-only. Do not change the existing `upstart-socket-bridge` service.
+
+## Verified 2026-11-06 execution and reporting
+
+- CI workflow run: `42307539843`, completed `success`; artifact `fizz-minimal-no-sdk-host-abi` (56,854 bytes).
+- Crostini monitor: `fizz-crostini-monitor.timer` enabled and active, polling every five minutes; journal recorded `FIZZ_HOST_TEST_REQUESTED RUN_ID=42307539843`, then `FIZZ_HOST_RESULT_PENDING`, then `FIZZ_HOST_RESULT_SUCCESS RUN_ID=42307539843`, followed by `FIZZ_NO_NEW_RUN`.
+- Request: `fizz-automation/requests/run-42307539843.json`; binary `fizz-runtime-capabilities`; SHA-256 `f26626681ec8e910fa6aa9e540cb5a29679fc5afa47c7a22fe1c4f4c82f73c77`.
+- Real host result: `fizz-automation/results/run-42307539843.json`; `passed: true`, `exit_code: 0`, empty stderr; `RUNTIME_ARCH=x86_64`, kernel `5.4.302-23860-g99bb19cb02b8`, UID/EUID/GID `1000`, effective capabilities `0`, SELinux `u:r:cros_browser:s0`, `FIZZ_RUNTIME_CAPABILITIES_COMPLETE`.
+- Crostini state: `{"current": null, "last_completed": 42307539843}`. GitHub commit status API returned `fizz/real-chromeos-host` state `success` with description `ChromeOS Fizz host test success (run 42307539843)`.
+- Host worker subsequently confirmed alive as `chronos` PID `713182` with `--interval 30`, reporting `FIZZ_HOST_NO_PENDING_REQUEST` during idle polling. PID is illustrative only.
+- **Limitations:** Crostini timer runs only while its user manager/container is active; ChromeOS worker is not automatically restarted after host reboot; no independent signed provenance or cryptographic attestation is provided. No additional future-run automation test is yet documented.
 
 ## Troubleshooting
 
@@ -59,7 +68,7 @@ sudo -n -u chronos /usr/local/bin/python3 /usr/local/fizz-testing/fizz-host-work
 
 ## Security boundary
 
-This is intentionally **not a general-purpose remote shell** and it opens no TCP port. Binary name is fixed to `fizz-runtime-capabilities`; requests are strict JSON; no request-supplied executable path or shell command is accepted. The worker never needs root: its persistent process and tested executable both run as chronos UID/EUID 1000. Its executable workspace must be owned by chronos and mode 0700. Prior interactive tests observed no effective Linux capabilities and SELinux context `u:r:cros_browser:s0`; the new unattended launch path must be verified separately.
+This is intentionally **not a general-purpose remote shell** and it opens no TCP port. Binary name is fixed to `fizz-runtime-capabilities`; requests are strict JSON; no request-supplied executable path or shell command is accepted. The worker never needs root: its persistent process and tested executable both run as chronos UID/EUID 1000. Its executable workspace must be owned by chronos and mode 0700. The real worker-driven host test observed `RUNTIME_UID=1000`, `RUNTIME_EUID=1000`, `STATUS_CapEff: 0000000000000000`, and SELinux context `u:r:cros_browser:s0`.
 
 However, the shared Downloads directory is writable by Crostini/chronos. A party able to alter both an artifact and its accompanying SHA-256 can request execution of arbitrary machine code **as chronos**, but not through a root runner. SHA-256 is transfer integrity, **not publisher authentication**. GitHub statuses derived from files in this shared directory can also be spoofed by local writers. Keep this test system confined to trusted local accounts. Before treating this as a production security boundary, add independent signed artifact provenance verified on the host and authenticated result reporting. Do not run with privileged user-supplied shell commands, add a network listener, or weaken ChromeOS mount/SELinux policy.
 
