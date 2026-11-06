@@ -1,0 +1,27 @@
+name: Discover exact Fizz R150 public buildspec
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/discover-fizz-buildspec.yml'
+      - 'scripts/discover-fizz-buildspec.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe exact 16700.66.0 public buildspec
+        run: bash scripts/discover-fizz-buildspec.sh
+      - name: Publish result, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-public-buildspec-discovery
+          path: reports/
+          if-no-files-found: warn
