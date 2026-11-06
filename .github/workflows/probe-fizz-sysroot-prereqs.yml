@@ -1,0 +1,37 @@
+name: Fizz pinned sysroot source preflight
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-fizz-sysroot-prereqs.yml'
+      - 'scripts/probe-fizz-sysroot-prereqs.sh'
+      - 'scripts/report-fizz-sysroot-prereqs.py'
+      - 'scripts/checkout-fizz-pinned.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  sysroot-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect runner resources
+        run: |
+          set -euo pipefail
+          df -h .
+          free -h
+          mkdir -p reports
+      - name: Sync bounded pinned SDK prerequisites
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=30s 14m bash scripts/probe-fizz-sysroot-prereqs.sh
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-sysroot-source-preflight
+          path: reports/
+          if-no-files-found: warn
