@@ -16,12 +16,12 @@ jobs:
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
-      - name: Limit checkout to 12 GiB of workspace usage
+      - name: Record runner capacity before limited checkout
         run: |
           set -euo pipefail
           df -h .
           mkdir -p reports
-          echo "Runner free space is reported before and after sync."
+          echo "This probe syncs only three named projects and has a 13-minute command timeout; disk usage is measured, not hard-capped."
       - name: Initialize pinned manifest and sync selected projects
         run: |
           set -euo pipefail
