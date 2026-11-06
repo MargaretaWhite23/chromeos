@@ -13,6 +13,8 @@ on:
       - 'tests/fizz-static-probe.c'
       - 'scripts/audit-fizz-static-elf.py'
       - 'tests/test-fizz-static-probe.py'
+      - 'tests/fizz-runtime-capabilities.c'
+      - 'tests/test-fizz-runtime-capabilities.py'
 
 permissions:
   contents: read
