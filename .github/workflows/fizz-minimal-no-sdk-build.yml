@@ -8,6 +8,8 @@ on:
       - 'scripts/inventory-fizz-public-artifacts.py'
       - 'scripts/build-fizz-minimal-no-sdk.sh'
       - 'tests/fizz-hello.c'
+      - 'scripts/audit-fizz-elf-abi.py'
+      - 'tests/test-fizz-abi-audit.py'
 
 permissions:
   contents: read
@@ -22,6 +24,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends clang lld binutils file
+      - name: Test ELF ABI parser
+        run: python3 tests/test-fizz-abi-audit.py
       - name: Discover public ChromiumOS artifacts and compile standalone smoke test
         run: timeout --signal=TERM --kill-after=15s 8m bash scripts/build-fizz-minimal-no-sdk.sh
       - name: Upload build binary and diagnostic report
