@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""Restricted ChromeOS worker. Polls a shared-file queue; opens no network port.
+"""Unprivileged ChromeOS host worker. No TCP listener or general shell API.
 
-The installed host-test shell script copies the binary to /usr/local and
-executes it as chronos (UID 1000). Never accepts shell commands or paths.
+The worker runs as chronos (UID/EUID 1000) and can execute only allowlisted
+artifact names copied to a chronos-owned directory on the executable filesystem.
 """
 import argparse
 import datetime
+import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 NAME = "fizz-runtime-capabilities"
-HOST_SCRIPT = Path("/usr/local/fizz-testing/fizz-test-on-chromeos.sh")
 SPOOL = Path("/home/chronos/user/MyFiles/Downloads/fizz-automation")
+DOWNLOADS = Path("/home/chronos/user/MyFiles/Downloads")
+RUN_DIRECTORY = Path("/usr/local/fizz-testing/chronos-run")
+LOCK = RUN_DIRECTORY / ".fizz-host-worker.lock"
 SHA64 = re.compile(r"^[a-f0-9]{64}$")
 SHA40 = re.compile(r"^[a-f0-9]{40}$")
 REQUEST_FILE = re.compile(r"^run-([1-9][0-9]*)\.json$")
@@ -40,20 +45,53 @@ def atomic_result(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name("." + path.name + ".tmp-" + str(os.getpid()))
     try:
-        tmp.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n")
-        tmp.chmod(0o644)
+        # Never follow an attacker-controlled symlink in the shared directory.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w") as out:
+            json.dump(data, out, sort_keys=True, indent=2)
+            out.write("\n")
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
 
 
-def check_host_script(path):
+def check_run_directory(path):
+    if os.geteuid() != 1000:
+        raise RuntimeError("Host worker must run as chronos EUID 1000, not root")
+    if not path.is_dir() or path.is_symlink():
+        raise RuntimeError("Missing chronos-owned executable work directory")
     stat = path.stat()
-    if not path.is_file() or stat.st_uid != 0 or (stat.st_mode & 0o022):
-        raise RuntimeError("Refusing untrusted or writable host-test script")
+    if stat.st_uid != 1000 or stat.st_mode & 0o077:
+        raise RuntimeError("Work directory must be owned by chronos and mode 0700")
 
 
-def process_request(request_file, result_file, host_script=HOST_SCRIPT):
+def execute_verified(binary, sha256, work_directory=RUN_DIRECTORY):
+    with tempfile.TemporaryDirectory(prefix="fizz-", dir=work_directory) as folder:
+        target = Path(folder) / NAME
+        # Read the supplied source once and verify exactly the bytes copied
+        # to an executable filesystem. SHA is integrity, not publisher auth.
+        digest = hashlib.sha256()
+        with binary.open("rb") as source, target.open("xb") as out:
+            while True:
+                chunk = source.read(65536)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                out.write(chunk)
+        if digest.hexdigest() != sha256:
+            raise ValueError("Target artifact checksum mismatch")
+        if hashlib.sha256(target.read_bytes()).hexdigest() != sha256:
+            raise ValueError("Executable copy checksum mismatch")
+        target.chmod(0o700)
+        try:
+            p = subprocess.run([str(target)], capture_output=True,
+                               text=True, timeout=120, check=False)
+            return p.returncode, p.stdout, p.stderr
+        except subprocess.TimeoutExpired:
+            return 124, "", "HOST_TEST_TIMEOUT\n"
+
+
+def process_request(request_file, result_file, work_directory=RUN_DIRECTORY):
     request = json.loads(request_file.read_text())
     if not valid_request(request):
         raise ValueError("Request schema rejected")
@@ -61,29 +99,21 @@ def process_request(request_file, result_file, host_script=HOST_SCRIPT):
         raise ValueError("Request filename mismatch")
     if result_file.exists():
         return None
-    check_host_script(host_script)
-    binary = Path("/home/chronos/user/MyFiles/Downloads") / (
-        "fizz-" + str(request["run_id"]) + "-" + NAME)
-    # Hash before invoking the installed script, which independently rechecks
-    # the same checksum both before and after copying to /usr/local.
-    if not binary.is_file() or hashlib.sha256(binary.read_bytes()).hexdigest() != request["sha256"]:
-        exit_code, stdout, stderr = 1, "HOST_STAGE_CHECKSUM_FAILED\n", ""
+    check_run_directory(work_directory)
+    binary = DOWNLOADS / ("fizz-" + str(request["run_id"]) + "-" + NAME)
+    if not binary.is_file():
+        exit_code, stdout, stderr = 1, "", "STAGED_FILE_MISSING\n"
     else:
         try:
-            result = subprocess.run(
-                [str(host_script), str(request["run_id"]), NAME, request["sha256"]],
-                capture_output=True, text=True, timeout=120, check=False,
-            )
-            exit_code, stdout, stderr = result.returncode, result.stdout, result.stderr
-        except subprocess.TimeoutExpired:
-            exit_code, stdout, stderr = 124, "", "HOST_TEST_TIMEOUT\n"
+            exit_code, stdout, stderr = execute_verified(
+                binary, request["sha256"], work_directory)
+        except (OSError, ValueError) as exc:
+            exit_code, stdout, stderr = 1, "", "HOST_EXECUTION_REJECTED " + str(exc)
     passed = (
         exit_code == 0
-        and "FIZZ_HOST_TEST_PASS" in stdout
         and "FIZZ_RUNTIME_CAPABILITIES_COMPLETE" in stdout
         and "RUNTIME_UID=1000" in stdout
         and "RUNTIME_EUID=1000" in stdout
-        and "CHROMEOS_EXIT_CODE=0" in stdout
     )
     response = {
         "run_id": request["run_id"],
@@ -99,11 +129,11 @@ def process_request(request_file, result_file, host_script=HOST_SCRIPT):
     return response
 
 
-def once(spool=SPOOL):
+def once(spool=SPOOL, work_directory=RUN_DIRECTORY):
     requests = spool / "requests"
     results = spool / "results"
-    if not requests.is_dir():
-        print("FIZZ_NO_REQUEST_DIRECTORY")
+    if not requests.is_dir() or requests.is_symlink():
+        print("FIZZ_NO_VALID_REQUEST_DIRECTORY")
         return 0
     for request in sorted(requests.iterdir()):
         if not REQUEST_FILE.fullmatch(request.name) or request.is_symlink():
@@ -112,7 +142,7 @@ def once(spool=SPOOL):
         if result.exists():
             continue
         try:
-            response = process_request(request, result)
+            response = process_request(request, result, work_directory)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print("FIZZ_HOST_REQUEST_REJECTED " + request.name + " " + str(exc), file=sys.stderr)
             continue
@@ -130,23 +160,27 @@ def main():
     parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--spool", type=Path, default=SPOOL)
     args = parser.parse_args()
-    if os.geteuid() != 0:
-        parser.error("Run on ChromeOS host as root; probe itself runs as chronos")
     if not 10 <= args.interval <= 3600:
         parser.error("interval must be 10..3600 seconds")
-    check_host_script(HOST_SCRIPT)
-    if args.once:
-        once(args.spool)
-        return
-    print("FIZZ_HOST_WORKER_STARTED", flush=True)
-    while True:
+    check_run_directory(RUN_DIRECTORY)
+    with LOCK.open("a") as handle:
         try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("FIZZ_HOST_WORKER_ALREADY_RUNNING")
+            return
+        if args.once:
             once(args.spool)
-        except Exception as exc:
-            print("FIZZ_HOST_WORKER_ERROR " + str(exc), file=sys.stderr)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        time.sleep(args.interval)
+            return
+        print("FIZZ_HOST_WORKER_STARTED", flush=True)
+        while True:
+            try:
+                once(args.spool)
+            except Exception as exc:
+                print("FIZZ_HOST_WORKER_ERROR " + str(exc), file=sys.stderr)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            time.sleep(args.interval)
 
 
 if __name__ == "__main__":
