@@ -1,0 +1,9 @@
+[Unit]
+Description=Stage verified GitHub Actions Fizz artifacts for ChromeOS host tests
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/share/fizz-automation/fizz-crostini-monitor.py
+TimeoutStartSec=300
