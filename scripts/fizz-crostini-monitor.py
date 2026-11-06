@@ -21,6 +21,7 @@ ARTIFACTS = Path.home() / "fizz-github-artifacts"
 DEFAULT_SPOOL = Path("/mnt/chromeos/MyFiles/Downloads/fizz-automation")
 DEFAULT_STATE = Path.home() / ".local/state/fizz-automation/state.json"
 HEX64 = re.compile(r"^[a-f0-9]{64}$")
+HEX40 = re.compile(r"^[a-f0-9]{40}$")
 
 
 def command(argv, timeout=120):
@@ -47,7 +48,7 @@ def valid_request(request):
         and isinstance(request.get("sha256"), str)
         and HEX64.fullmatch(request["sha256"]) is not None
         and isinstance(request.get("head_sha"), str)
-        and HEX64.fullmatch(request["head_sha"]) is not None
+        and HEX40.fullmatch(request["head_sha"]) is not None
     )
 
 
@@ -62,7 +63,7 @@ def get_runs():
             and r.get("conclusion") == "success"
             and type(r.get("databaseId")) is int
             and isinstance(r.get("headSha"), str)
-            and HEX64.fullmatch(r["headSha"]) is not None]
+            and HEX40.fullmatch(r["headSha"]) is not None]
 
 
 def stage(run):
