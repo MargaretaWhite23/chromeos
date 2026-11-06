@@ -1,0 +1,28 @@
+name: Fizz SDK entrypoint and source inventory
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/inventory-fizz-sdk-entrypoints.yml'
+      - 'scripts/inventory-fizz-sdk-entrypoints.py'
+      - 'scripts/run-fizz-sdk-entrypoint-inventory.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory SDK entrypoints in exact-buildspec sources
+        run: timeout --signal=TERM --kill-after=30s 17m bash scripts/run-fizz-sdk-entrypoint-inventory.sh
+      - name: Upload SDK entrypoint inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-sdk-entrypoints
+          path: reports/
+          if-no-files-found: warn
