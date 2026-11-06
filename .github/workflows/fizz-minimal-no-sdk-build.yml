@@ -2,6 +2,8 @@ name: Fizz minimal no-SDK build
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
   push:
     paths:
       - '.github/workflows/fizz-minimal-no-sdk-build.yml'
@@ -17,6 +19,12 @@ on:
       - 'tests/test-fizz-runtime-capabilities.py'
       - 'scripts/fizz-stage-github-artifact.sh'
       - 'scripts/fizz-test-on-chromeos.sh'
+      - 'scripts/fizz-crostini-monitor.py'
+      - 'scripts/fizz-host-worker.py'
+      - 'scripts/install-fizz-crostini-timer.sh'
+      - 'systemd/fizz-crostini-monitor.service'
+      - 'systemd/fizz-crostini-monitor.timer'
+      - 'tests/test_fizz_automation.py'
 
 permissions:
   contents: read
@@ -33,6 +41,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang lld binutils file musl-tools
       - name: Validate Crostini and ChromeOS shell scripts
         run: bash -n scripts/fizz-stage-github-artifact.sh scripts/fizz-test-on-chromeos.sh
+      - name: Verify unattended monitor and host-worker scripts
+        run: |
+          bash -n scripts/install-fizz-crostini-timer.sh
+          python3 -m py_compile scripts/fizz-crostini-monitor.py scripts/fizz-host-worker.py
+          python3 -m unittest discover -s tests -p 'test_fizz_automation.py' -v
       - name: Test ELF ABI parser
         run: python3 tests/test-fizz-abi-audit.py
       - name: Discover public ChromiumOS artifacts and compile standalone smoke test
