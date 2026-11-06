@@ -73,7 +73,7 @@ class AutomationTests(unittest.TestCase):
                 worker.atomic_result(
                     spool / "results" / ("run-" + str(RUN) + ".json"),
                     {**sample(), "exit_code": 0, "passed": True,
-                     "stdout": "FIZZ_HOST_TEST_PASS"}
+                     "stdout": "FIZZ_RUNTIME_CAPABILITIES_COMPLETE\nRUNTIME_UID=1000\nRUNTIME_EUID=1000"}
                 )
                 monitor.one_cycle(spool, state)
                 self.assertEqual(publish.call_args.args[1], "success")
@@ -91,7 +91,7 @@ class AutomationTests(unittest.TestCase):
                 spool / "results" / ("run-" + str(RUN) + ".json"),
                 {**sample(), "sha256": "0" * 64,
                  "exit_code": 0, "passed": True,
-                 "stdout": "FIZZ_HOST_TEST_PASS"}
+                 "stdout": "FIZZ_RUNTIME_CAPABILITIES_COMPLETE\nRUNTIME_UID=1000\nRUNTIME_EUID=1000"}
             )
             with self.assertRaises(ValueError), \
                  patch.object(monitor, "github_status"):
