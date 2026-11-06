@@ -1,0 +1,27 @@
+name: Audit all Fizz R150 pinned projects
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/audit-fizz-all-projects.yml'
+      - 'scripts/audit-fizz-all-projects.py'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-all:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all 296 exact-buildspec pinned commits
+        run: python3 scripts/audit-fizz-all-projects.py
+      - name: Upload complete report even if failures occur
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizz-16700-66-0-all-pinned-projects
+          path: reports/
+          if-no-files-found: error
