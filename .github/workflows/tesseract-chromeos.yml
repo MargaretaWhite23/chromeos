@@ -42,33 +42,36 @@ jobs:
           set -eu
           mkdir -p package/bin package/lib package/tessdata
           cp /opt/tesseract/bin/tesseract package/bin/tesseract.real
-          # Alpine's pax-utils package does not necessarily ship lddtree.
-          # Resolve direct and transitive shared-library dependencies with musl ldd.
+          # Resolve DT_NEEDED entries recursively using scanelf (pax-utils).
+          # This avoids parsing musl ldd output and captures transitive dependencies.
           cp -L /lib/ld-musl-x86_64.so.1 package/lib/ld-musl-x86_64.so.1
-          printf '%s\\n' /opt/tesseract/bin/tesseract > /tmp/tess-elf-queue
+          printf '%s\n' /opt/tesseract/bin/tesseract > /tmp/tess-elf-queue
           : > /tmp/tess-elf-seen
           while [ -s /tmp/tess-elf-queue ]; do
             ELF="$(head -n 1 /tmp/tess-elf-queue)"
             sed -i '1d' /tmp/tess-elf-queue
-            if grep -Fqx "$ELF" /tmp/tess-elf-seen; then continue; fi
-            printf '%s\\n' "$ELF" >> /tmp/tess-elf-seen
-            ldd "$ELF" | while IFS= read -r line; do
-              case "$line" in
-                *" => "*) LIB="${line#* => }"; LIB="${LIB%% *}" ;;
-                /*) LIB="${line%% *}" ;;
-                *) continue ;;
-              esac
-              case "$LIB" in
-                /*)
-                  if [ -f "$LIB" ]; then
-                    DEST="package/lib/$(basename "$LIB")"
-                    if [ ! -f "$DEST" ]; then
-                      cp -L "$LIB" "$DEST"
-                      printf '%s\\n' "$LIB" >> /tmp/tess-elf-queue
-                    fi
-                  fi ;;
-              esac
+            grep -Fqx "$ELF" /tmp/tess-elf-seen && continue
+            printf '%s\n' "$ELF" >> /tmp/tess-elf-seen
+            scanelf -n -F '%n' "$ELF" | tr ',' '\n' | while IFS= read -r SONAME; do
+              [ -n "$SONAME" ] || continue
+              case "$SONAME" in ld-musl-*.so.1) continue ;; esac
+              if [ -f "package/lib/$SONAME" ]; then continue; fi
+              FOUND=""
+              for DIR in /lib /usr/lib /usr/local/lib; do
+                if [ -f "$DIR/$SONAME" ]; then FOUND="$DIR/$SONAME"; break; fi
+              done
+              if [ -z "$FOUND" ]; then
+                echo "ERROR: Missing shared library $SONAME required by $ELF" >&2
+                exit 1
+              fi
+              cp -L "$FOUND" "package/lib/$SONAME"
+              printf '%s\n' "$FOUND" >> /tmp/tess-elf-queue
             done
+          done
+          echo "=== BUNDLED LIBRARIES ==="
+          ls -lh package/lib/
+          for LIB in libleptonica.so.6 libstdc++.so.6 libgcc_s.so.1; do
+            test -s "package/lib/$LIB" || { echo "Missing required $LIB" >&2; exit 1; }
           done
           test -s package/lib/ld-musl-x86_64.so.1
           ls -lh package/lib/
