@@ -56,6 +56,70 @@ The first real-host test has passed. The long-lived worker has subsequently been
 - Host worker subsequently confirmed alive as `chronos` PID `713182` with `--interval 30`, reporting `FIZZ_HOST_NO_PENDING_REQUEST` during idle polling. PID is illustrative only.
 - **Limitations:** Crostini timer runs only while its user manager/container is active; ChromeOS worker is not automatically restarted after host reboot; no independent signed provenance or cryptographic attestation is provided. No additional future-run automation test is yet documented.
 
+## Installed filesystem and service inventory (verified 2026-11-06)
+
+This inventory records paths **touched or used by the Fizz automation setup** and separates confirmed installed files from existing files, shared storage and unverified artifact filenames. It is based on the successful bridge commands and logs, not a fresh exhaustive filesystem scan. Paths beginning with `~` refer to Crostini user `willmoss26`.
+
+### Real ChromeOS host (Fizz)
+
+| Path | Kind | Action / purpose |
+| --- | --- | --- |
+| `/usr/local/fizz-testing/` | Directory | Existing host test installation directory, reused |
+| `/usr/local/fizz-testing/fizz-host-worker.py` | File | Installed from shared Downloads, executable mode 0755; SHA-256 `b874df39784166b48e61ba24aa00b81f7ee884878397d35a94c7916c00696025` |
+| `/usr/local/fizz-testing/fizz-test-on-chromeos.sh` | File | Pre-existing manual host-test script, not replaced by the worker installation |
+| `/usr/local/fizz-testing/chronos-run/` | Directory | Private executable workspace; owner `chronos:chronos`, mode 0700 |
+| `/usr/local/fizz-testing/chronos-run/worker.pid` | File | PID file for manually detached worker |
+| `/usr/local/fizz-testing/chronos-run/worker.log` | File | Persistent worker stdout/stderr log |
+| `/home/chronos/user/MyFiles/Downloads/fizz-host-worker.py` | File | Staged installation copy, checksum verified |
+| `/home/chronos/user/MyFiles/Downloads/fizz-automation/requests/` | Directory | Shared incoming JSON requests; contains `run-42307539843.json` |
+| `/home/chronos/user/MyFiles/Downloads/fizz-automation/results/` | Directory | Shared JSON results; contains `run-42307539843.json` |
+
+The worker copies the verified executable from shared Downloads to its private executable workspace before running it, because shared Downloads is not executable. Other staged artifact filenames were not independently enumerated in the recorded logs.
+
+**Host process:** `/usr/local/fizz-testing/fizz-host-worker.py --interval 30` under `chronos` (UID 1000), launched with `nohup`. Observed PID `713182` on 2026-11-06; this PID is not stable across restarts. Logs showed `FIZZ_HOST_WORKER_STARTED` and `FIZZ_HOST_NO_PENDING_REQUEST`. This process is **not** an Upstart service and will not be restarted automatically after reboot.
+
+**Existing host service:** `upstart-socket-bridge` was **not changed or restarted**. A proposed `fizz-host-worker` Upstart service has **not been installed**. No new listener, kernel modification or SELinux policy change was made.
+
+### Crostini (Debian 12, penguin)
+
+| Path | Kind | Action / purpose |
+| --- | --- | --- |
+| `~/.local/share/fizz-automation/fizz-crostini-monitor.py` | File | Installed GitHub Actions polling/host-result monitor |
+| `~/.local/share/fizz-automation/fizz-stage-github-artifact.sh` | File | Installed SHA-256-verifying artifact staging script |
+| `~/.config/systemd/user/fizz-crostini-monitor.service` | File | Installed systemd user oneshot service |
+| `~/.config/systemd/user/fizz-crostini-monitor.timer` | File | Installed systemd user timer |
+| `~/.config/systemd/user/timers.target.wants/fizz-crostini-monitor.timer` | Symlink | Created when timer enabled |
+| `~/.local/state/fizz-automation/state.json` | File | Durable run tracking: `{"current": null, "last_completed": 42307539843}` at verification |
+| `~/fizz-automation-install/` | Directory | Download and installer staging workspace |
+| `~/fizz-automation-install/fizz-host-worker.py` | File | Downloaded and syntax-checked worker |
+| `~/fizz-automation-install/scripts/` | Directory | Downloaded installation scripts |
+| `~/fizz-automation-install/systemd/` | Directory | Downloaded service/timer source units |
+| `/mnt/chromeos/MyFiles/Downloads/fizz-host-worker.py` | File | Staged worker in ChromeOS-shared Downloads |
+| `/mnt/chromeos/MyFiles/Downloads/fizz-automation/requests/` | Directory | Same underlying shared request queue as ChromeOS path above |
+| `/mnt/chromeos/MyFiles/Downloads/fizz-automation/results/` | Directory | Same underlying shared result queue as ChromeOS path above |
+
+**Crostini services:** `fizz-crostini-monitor.timer` is enabled and active; runs every five minutes while the Crostini user manager is active. `fizz-crostini-monitor.service` is a `Type=oneshot` service; `inactive (dead)` between successful runs is expected. Crostini does not automatically stay running after the host shuts down.
+
+**Other staging:** `~/fizz-pipeline-scripts/fizz-stage-github-artifact.sh` was used in the earlier manual host-test workflow. The shared Downloads staging script also downloaded the CI artifact and checksum material; exact resulting artifact paths should be enumerated on the live machine before declaring a complete file-by-file audit.
+
+### Relevant source files in this repository
+
+- `scripts/fizz-crostini-monitor.py`
+- `scripts/fizz-host-worker.py`
+- `scripts/fizz-stage-github-artifact.sh`
+- `scripts/install-fizz-crostini-timer.sh`
+- `systemd/fizz-crostini-monitor.service`
+- `systemd/fizz-crostini-monitor.timer`
+- `tests/test_fizz_automation.py`
+- `.github/workflows/fizz-minimal-no-sdk-build.yml`
+- `docs/fizz-unattended-host-automation.md`
+
+### Operational inspection
+
+On **Crostini**, use `systemctl --user status fizz-crostini-monitor.timer`, `systemctl --user status fizz-crostini-monitor.service`, `journalctl --user -u fizz-crostini-monitor.service -n 50 --no-pager`, and `cat ~/.local/state/fizz-automation/state.json`.
+
+On **ChromeOS**, inspect `ps -ef | grep '[f]izz-host-worker.py'`, `tail -50 /usr/local/fizz-testing/chronos-run/worker.log`, and `ls -la /home/chronos/user/MyFiles/Downloads/fizz-automation/{requests,results}`.
+
 ## Troubleshooting
 
 - `FIZZ_NO_NEW_RUN`: there is no more recent completed successful main workflow run.
