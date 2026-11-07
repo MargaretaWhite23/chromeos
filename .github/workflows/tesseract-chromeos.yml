@@ -1,0 +1,93 @@
+name: Tesseract OCR for ChromeOS x86_64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tesseract-chromeos.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: alpine:3.21
+    steps:
+      - name: Install build dependencies
+        run: |
+          apk add --no-cache build-base cmake ninja git leptonica-dev pkgconf \
+            tesseract-ocr-data-eng pax-utils zip coreutils file
+
+      - name: Compile Tesseract 5.5.1 from source
+        shell: sh
+        run: |
+          set -eu
+          git clone --depth 1 --branch 5.5.1 https://github.com/tesseract-ocr/tesseract.git source
+          cmake -S source -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/opt/tesseract \
+            -DBUILD_TRAINING_TOOLS=OFF \
+            -DBUILD_TESTS=OFF \
+            -DOPENMP_BUILD=OFF
+          cmake --build build --parallel 2
+          cmake --install build
+          /opt/tesseract/bin/tesseract --version
+
+      - name: Bundle musl runtime, libraries and English OCR data
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p package/bin package/lib package/tessdata
+          cp /opt/tesseract/bin/tesseract package/bin/tesseract.real
+          lddtree -l /opt/tesseract/bin/tesseract | while IFS= read -r lib; do
+            case "$lib" in
+              /*) cp -L "$lib" "package/lib/$(basename "$lib")" ;;
+            esac
+          done
+          cp /usr/share/tessdata/eng.traineddata package/tessdata/
+          cat > package/tesseract <<'EOF'
+          #!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          export TESSDATA_PREFIX="$ROOT/tessdata"
+          exec "$ROOT/lib/ld-musl-x86_64.so.1" --library-path "$ROOT/lib" "$ROOT/bin/tesseract.real" "$@"
+          EOF
+          chmod +x package/tesseract
+          package/tesseract --version
+          package/tesseract --list-langs | grep -x eng
+
+      - name: Package ZIP and SHA-256
+        shell: sh
+        run: |
+          set -eu
+          mkdir -p dist
+          cd package
+          zip -qr ../dist/tesseract-chromeos-x86_64-musl.zip .
+          cd ../dist
+          sha256sum tesseract-chromeos-x86_64-musl.zip > tesseract-chromeos-x86_64-musl.zip.sha256
+
+      - name: Upload GitHub Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tesseract-chromeos-x86_64-musl
+          path: dist/
+          if-no-files-found: error
+
+      - name: Publish versioned GitHub Release
+        if: github.ref == 'refs/heads/main'
+        shell: sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          apk add --no-cache github-cli
+          TAG="tesseract-chromeos-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Tesseract OCR for ChromeOS build ${GITHUB_RUN_NUMBER}" \
+            --notes "Tesseract 5.5.1, x86_64 Linux/musl portable runtime with English traineddata. Built in GitHub Actions; ChromeOS host execution requires validation." \
+            --latest=false
