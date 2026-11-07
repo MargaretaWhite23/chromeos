@@ -27,7 +27,7 @@ on:
       - 'tests/test_fizz_automation.py'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   minimal-build:
@@ -59,3 +59,25 @@ jobs:
             output/
             reports/
           if-no-files-found: warn
+
+      - name: Package successful build for long-term GitHub Release storage
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          zip -q -r "release/fizz-build-${GITHUB_RUN_NUMBER}.zip" output reports
+          cd release
+          sha256sum "fizz-build-${GITHUB_RUN_NUMBER}.zip" > "fizz-build-${GITHUB_RUN_NUMBER}.zip.sha256"
+      - name: Publish versioned GitHub Release assets
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="fizz-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Fizz build ${GITHUB_RUN_NUMBER}" \
+            --notes "Successful GitHub Actions Fizz build. Source commit: ${GITHUB_SHA}. Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Includes compiled output, diagnostic reports, and SHA-256 checksum." \
+            --latest=false
