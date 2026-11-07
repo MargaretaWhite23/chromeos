@@ -32,7 +32,7 @@ jobs:
             -DBUILD_TRAINING_TOOLS=OFF \
             -DBUILD_TESTS=OFF \
             -DOPENMP_BUILD=OFF
-          cmake --build build --parallel 2
+          cmake --build build --parallel 4
           cmake --install build
           /opt/tesseract/bin/tesseract --version
 
