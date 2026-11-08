@@ -108,7 +108,7 @@ jobs:
           unzip -q dist/tesseract-chromeos-x86_64-musl.zip -d "$stage"
           env -i PATH=/usr/bin:/bin "$stage/tesseract" --version
           env -i PATH=/usr/bin:/bin TESSDATA_PREFIX=/tessdata \
-            chroot "$stage" /lib/ld-musl-x86_64.so.1 --library-path /lib \
+            /bin/busybox chroot "$stage" /lib/ld-musl-x86_64.so.1 --library-path /lib \
             /bin/tesseract.real --list-langs > "$stage/languages"
           grep -x eng "$stage/languages"
 
