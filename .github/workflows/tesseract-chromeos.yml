@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          apk add --no-cache build-base cmake ninja git leptonica-dev pkgconf \
+          apk add --no-cache unzip build-base cmake ninja git leptonica-dev pkgconf \
             tesseract-ocr-data-eng pax-utils zip coreutils file
 
       - name: Compile Tesseract 5.5.1 from source
@@ -52,7 +52,8 @@ jobs:
             sed -i '1d' /tmp/tess-elf-queue
             grep -Fqx "$ELF" /tmp/tess-elf-seen && continue
             printf '%s\n' "$ELF" >> /tmp/tess-elf-seen
-            scanelf -n -F '%n' "$ELF" | tr ',' '\n' | while IFS= read -r SONAME; do
+            NEEDED="$(scanelf -B -F '%n' "$ELF")"
+            printf '%s\n' "$NEEDED" | tr ',' '\n' | while IFS= read -r SONAME; do
               [ -n "$SONAME" ] || continue
               case "$SONAME" in ld-musl-*.so.1) continue ;; esac
               if [ -f "package/lib/$SONAME" ]; then continue; fi
@@ -96,6 +97,20 @@ jobs:
           zip -qr ../dist/tesseract-chromeos-x86_64-musl.zip .
           cd ../dist
           sha256sum tesseract-chromeos-x86_64-musl.zip > tesseract-chromeos-x86_64-musl.zip.sha256
+
+      - name: Verify extracted ZIP with only bundled runtime
+        shell: sh
+        run: |
+          set -eu
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          (cd dist && sha256sum -c tesseract-chromeos-x86_64-musl.zip.sha256)
+          unzip -q dist/tesseract-chromeos-x86_64-musl.zip -d "$stage"
+          env -i PATH=/usr/bin:/bin "$stage/tesseract" --version
+          env -i PATH=/usr/bin:/bin TESSDATA_PREFIX=/tessdata \
+            chroot "$stage" /lib/ld-musl-x86_64.so.1 --library-path /lib \
+            /bin/tesseract.real --list-langs > "$stage/languages"
+          grep -x eng "$stage/languages"
 
       - name: Upload GitHub Actions artifact
         uses: actions/upload-artifact@v4
