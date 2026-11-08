@@ -19,7 +19,7 @@ jobs:
       - name: Install build dependencies
         run: |
           apk add --no-cache unzip build-base cmake ninja git leptonica-dev pkgconf \
-            tesseract-ocr-data-eng pax-utils zip coreutils file
+            tesseract-ocr-data-eng binutils zip coreutils file
 
       - name: Compile Tesseract 5.5.1 from source
         shell: sh
@@ -42,7 +42,7 @@ jobs:
           set -eu
           mkdir -p package/bin package/lib package/tessdata
           cp /opt/tesseract/bin/tesseract package/bin/tesseract.real
-          # Resolve DT_NEEDED entries recursively using scanelf (pax-utils).
+          # Resolve DT_NEEDED entries recursively using readelf.
           # This avoids parsing musl ldd output and captures transitive dependencies.
           cp -L /lib/ld-musl-x86_64.so.1 package/lib/ld-musl-x86_64.so.1
           printf '%s\n' /opt/tesseract/bin/tesseract > /tmp/tess-elf-queue
@@ -52,10 +52,10 @@ jobs:
             sed -i '1d' /tmp/tess-elf-queue
             grep -Fqx "$ELF" /tmp/tess-elf-seen && continue
             printf '%s\n' "$ELF" >> /tmp/tess-elf-seen
-            NEEDED="$(scanelf -B -F '%n' "$ELF")"
-            printf '%s\n' "$NEEDED" | tr ',' '\n' | while IFS= read -r SONAME; do
+            DYNAMIC="$(LC_ALL=C readelf -d "$ELF")"
+            printf '%s\n' "$DYNAMIC" | awk -F '[][]' '/\(NEEDED\)/ {print $2}' | while IFS= read -r SONAME; do
               [ -n "$SONAME" ] || continue
-              case "$SONAME" in ld-musl-*.so.1) continue ;; esac
+              case "$SONAME" in ld-musl-x86_64.so.1|libc.musl-x86_64.so.1) continue ;; esac
               if [ -f "package/lib/$SONAME" ]; then continue; fi
               FOUND=""
               for DIR in /lib /usr/lib /usr/local/lib; do
