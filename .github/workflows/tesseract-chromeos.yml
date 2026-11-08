@@ -52,7 +52,7 @@ jobs:
             sed -i '1d' /tmp/tess-elf-queue
             grep -Fqx "$ELF" /tmp/tess-elf-seen && continue
             printf '%s\n' "$ELF" >> /tmp/tess-elf-seen
-            scanelf -n -F '%n' "$ELF" | tr ',' '\n' | while IFS= read -r SONAME; do
+            scanelf -q -n -F '%n' "$ELF" | tr ',' '\n' | while IFS= read -r SONAME; do
               [ -n "$SONAME" ] || continue
               case "$SONAME" in ld-musl-*.so.1) continue ;; esac
               if [ -f "package/lib/$SONAME" ]; then continue; fi
