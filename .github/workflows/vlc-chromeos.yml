@@ -1,0 +1,75 @@
+name: Headless VLC for ChromeOS x86_64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/vlc-chromeos.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: alpine:3.23
+    steps:
+      - name: Assemble Alpine musl VLC runtime
+        run: |
+          set -eu
+          apk add --no-cache ffmpeg zip unzip coreutils
+          mkdir -p package/rootfs/etc/apk dist
+          cp -R /etc/apk/keys package/rootfs/etc/apk/
+          apk --root "$PWD/package/rootfs" --initdb --no-cache \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/main \
+            --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
+            add alpine-baselayout busybox vlc
+          apk --root "$PWD/package/rootfs" info -v | sort > package/packages.txt
+          test -x package/rootfs/usr/bin/vlc
+          test -d package/rootfs/usr/lib/vlc/plugins
+          cat > package/cvlc <<'EOF'
+          #!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/rootfs" && pwd)"
+          export VLC_PLUGIN_PATH="$ROOT/usr/lib/vlc/plugins"
+          exec "$ROOT/lib/ld-musl-x86_64.so.1" \
+            --library-path "$ROOT/lib:$ROOT/usr/lib" "$ROOT/usr/bin/vlc" \
+            -I dummy --ignore-config --no-plugins-cache --no-one-instance "$@"
+          EOF
+          chmod +x package/cvlc
+          (cd package && zip -qry ../dist/vlc-chromeos-x86_64-musl.zip .)
+          (cd dist && sha256sum vlc-chromeos-x86_64-musl.zip > vlc-chromeos-x86_64-musl.zip.sha256)
+
+      - name: Transcode with the extracted VLC runtime
+        run: |
+          set -eu
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
+          (cd dist && sha256sum -c vlc-chromeos-x86_64-musl.zip.sha256)
+          unzip -q dist/vlc-chromeos-x86_64-musl.zip -d "$stage"
+          root="$stage/rootfs"
+          cp "$stage/cvlc" "$root/cvlc"
+          ln -s / "$root/rootfs"
+          mkdir -p "$root/tmp/vlc-test"
+          ffmpeg -v error -f lavfi -i 'testsrc2=size=160x120:rate=15' \
+            -f lavfi -i 'sine=frequency=440:sample_rate=48000' \
+            -t 3 -c:v libx264 -c:a aac "$root/tmp/vlc-test/input.mp4"
+          chown -R 65534:65534 "$root/tmp/vlc-test"
+          timeout 60 /bin/busybox chroot "$root" /bin/busybox su -s /bin/sh nobody -c \
+            'HOME=/tmp/vlc-test /cvlc -vv /tmp/vlc-test/input.mp4 --sout "#transcode{vcodec=mp4v,vb=256,acodec=mp4a,ab=96,channels=2,samplerate=48000}:std{access=file,mux=mp4,dst=/tmp/vlc-test/output.mp4}" vlc://quit'
+          output="$root/tmp/vlc-test/output.mp4"
+          test -s "$output"
+          test "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$output")" = mpeg4
+          test "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$output")" = aac
+          ffprobe -v error -show_entries format=duration -of csv=p=0 "$output" |
+            awk '$1 >= 2.5 && $1 <= 3.5 { pass=1 } END { exit !pass }'
+          ffmpeg -v error -xerror -i "$output" -map 0:v:0 -map 0:a:0 -f null -
+
+      - name: Upload verified VLC ZIP and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlc-chromeos-x86_64-musl
+          path: dist/
+          if-no-files-found: error
