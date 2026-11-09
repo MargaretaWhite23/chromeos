@@ -22,7 +22,7 @@ CFLAGS="-O2 -fcommon" ./configure \
   --disable-alsa \
   --enable-avcodec --enable-avformat --enable-swscale --enable-sout
 make -j4
-make -j1 DESTDIR="$work/install" install
+make -j1 DESTDIR="$work/install" appdata_DATA= install
 
 # Keep Alpine's runtime dependencies and replace its VLC code and modules.
 rm -rf "$runtime/usr/lib/vlc" "$runtime/usr/share/vlc"
