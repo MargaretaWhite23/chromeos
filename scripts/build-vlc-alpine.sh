@@ -19,6 +19,7 @@ CFLAGS="-O2 -fcommon" ./configure \
   --prefix=/usr --disable-static --disable-rpath --disable-nls \
   --disable-qt --disable-skins2 --disable-lua --disable-v4l2 \
   --disable-xcb --disable-wayland --disable-libva --disable-vdpau \
+  --disable-alsa \
   --enable-avcodec --enable-avformat --enable-swscale --enable-sout
 make -j4
 make -j1 DESTDIR="$work/install" install
