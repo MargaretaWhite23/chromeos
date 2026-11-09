@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/vlc-chromeos.yml'
+      - 'scripts/build-vlc-alpine.sh'
 
 permissions:
   contents: read
@@ -16,6 +17,7 @@ jobs:
     container:
       image: alpine:3.23
     steps:
+      - uses: actions/checkout@v4
       - name: Assemble Alpine musl VLC runtime
         run: |
           set -eu
@@ -27,6 +29,8 @@ jobs:
             --repository https://dl-cdn.alpinelinux.org/alpine/v3.23/community \
             add alpine-baselayout busybox vlc
           apk --root "$PWD/package/rootfs" info -v | sort > package/packages.txt
+          sh scripts/build-vlc-alpine.sh "$PWD/package/rootfs"
+          printf "VLC source version 3.0.24\n" > package/vlc-source.txt
           test -x package/rootfs/usr/bin/vlc
           test -d package/rootfs/usr/lib/vlc/plugins
           cat > package/cvlc <<'EOF'
@@ -57,6 +61,8 @@ jobs:
             -f lavfi -i 'sine=frequency=440:sample_rate=48000' \
             -t 3 -c:v libx264 -c:a aac "$root/tmp/vlc-test/input.mp4"
           chown -R 65534:65534 "$root/tmp/vlc-test"
+          /bin/busybox chroot "$root" /bin/busybox su -s /bin/sh nobody -c \
+            '/cvlc --version' | grep -F 'VLC media player 3.0.24'
           timeout 60 /bin/busybox chroot "$root" /bin/busybox su -s /bin/sh nobody -c \
             'HOME=/tmp/vlc-test /cvlc -vv /tmp/vlc-test/input.mp4 --sout "#transcode{vcodec=mp4v,vb=256,acodec=mp4a,ab=96,channels=2,samplerate=48000}:std{access=file,mux=mp4,dst=/tmp/vlc-test/output.mp4}" vlc://quit'
           output="$root/tmp/vlc-test/output.mp4"
