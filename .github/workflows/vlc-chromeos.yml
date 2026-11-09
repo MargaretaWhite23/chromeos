@@ -69,7 +69,7 @@ jobs:
               exit 1
             }
           cat "$stage/version.log"
-          grep -F 'VLC media player 3.0.24' "$stage/version.log" || {
+          grep -F 'VLC version 3.0.24' "$stage/version.log" || {
             echo "Expected VLC source version not found"
             exit 1
           }
