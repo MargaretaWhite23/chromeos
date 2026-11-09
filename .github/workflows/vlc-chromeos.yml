@@ -40,7 +40,7 @@ jobs:
           export VLC_PLUGIN_PATH="$ROOT/usr/lib/vlc/plugins"
           exec "$ROOT/lib/ld-musl-x86_64.so.1" \
             --library-path "$ROOT/lib:$ROOT/usr/lib" "$ROOT/usr/bin/vlc" \
-            -I dummy --ignore-config --no-plugins-cache --no-one-instance "$@"
+            -I dummy --ignore-config "$@"
           EOF
           chmod +x package/cvlc
           (cd package && zip -qry ../dist/vlc-chromeos-x86_64-musl.zip .)
