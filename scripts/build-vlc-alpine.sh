@@ -8,7 +8,7 @@ checksum=e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-apk add --no-cache build-base pkgconf curl xz ffmpeg7-dev \
+apk add --no-cache build-base linux-headers pkgconf curl xz ffmpeg7-dev \
   libgcrypt-dev libxml2-dev zlib-dev
 cd "$work"
 curl -fsSLO --retry 3 "https://get.videolan.org/vlc/$version/$archive"
