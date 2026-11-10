@@ -1,0 +1,61 @@
+name: Native ChromeOS Wayland Window
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/native-wayland-window.yml'
+      - 'tests/native-wayland-window.c'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    container:
+      image: alpine:3.23
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile musl x86_64 Wayland test client
+        shell: sh
+        run: |
+          set -eux
+          apk add --no-cache build-base wayland-dev wayland-protocols pkgconf pax-utils zip
+          mkdir -p build dist package/lib package/usr/lib
+          wayland-scanner client-header /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml build/xdg-shell-client-protocol.h
+          wayland-scanner private-code /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml build/xdg-shell-protocol.c
+          cc -O2 -Wall -Wextra -Ibuild tests/native-wayland-window.c build/xdg-shell-protocol.c -o build/native-wayland-window $(pkg-config --cflags --libs wayland-client)
+          file build/native-wayland-window
+          ldd build/native-wayland-window
+          cp build/native-wayland-window package/
+          # Bundle the Alpine musl loader and every resolved shared-library dependency.
+          lddtree -l build/native-wayland-window | sort -u | while IFS= read -r lib; do
+            test -f "$lib" || continue
+            mkdir -p "package$(dirname "$lib")"
+            cp -L "$lib" "package$lib"
+          done
+          cat > package/run-wayland-test <<'EOF'
+          #!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-/run/chrome/wayland-0}"
+          exec "$ROOT/lib/ld-musl-x86_64.so.1" --library-path "$ROOT/lib:$ROOT/usr/lib" "$ROOT/native-wayland-window" "$@"
+          EOF
+          chmod +x package/run-wayland-test
+          test -f package/lib/ld-musl-x86_64.so.1
+          (cd package && zip -qr ../dist/native-wayland-chromeos-x86_64-musl.zip .)
+          (cd dist && sha256sum native-wayland-chromeos-x86_64-musl.zip > native-wayland-chromeos-x86_64-musl.zip.sha256)
+      - name: Verify extracted runtime
+        shell: sh
+        run: |
+          set -eux
+          apk add --no-cache unzip
+          mkdir extracted
+          unzip -q dist/native-wayland-chromeos-x86_64-musl.zip -d extracted
+          test -x extracted/run-wayland-test
+          test -x extracted/native-wayland-window
+          test -f extracted/lib/ld-musl-x86_64.so.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-wayland-chromeos-x86_64-musl
+          path: dist/
+          if-no-files-found: error
