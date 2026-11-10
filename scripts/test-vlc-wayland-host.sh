@@ -25,11 +25,14 @@ echo "Wayland socket: /run/chrome/wayland-0"
 echo "Expect a visible VLC video window; confirm manually whether video and audio play."
 echo "Test will terminate the VLC child after 30 seconds."
 # Keep this test unprivileged and isolated: no installation, reboot, or host modifications.
-(
+if (
   cd "$pkg"
   WAYLAND_DISPLAY=/run/chrome/wayland-0 timeout 30 ./vlc-wayland -vv "$video"
-)
-rc=$?
+); then
+  rc=0
+else
+  rc=$?
+fi
 echo "VLC_WAYLAND_HOST_EXIT=$rc"
 # timeout returns 124 if VLC stayed alive for the whole observation window.
 case "$rc" in
