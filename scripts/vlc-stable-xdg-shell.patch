@@ -1,6 +1,6 @@
 --- a/modules/video_output/wayland/xdg-shell.c
 +++ b/modules/video_output/wayland/xdg-shell.c
-@@ -1,388 +1,397 @@
+@@ -1,388 +1,396 @@
  /**
   * @file xdg-shell.c
   * @brief XDG shell surface provider module for VLC media player
@@ -41,7 +41,7 @@
  #include <vlc_plugin.h>
  #include <vlc_vout_window.h>
  
- static_assert (XDG_SHELL_VERSION_CURRENT == 5, "XDG shell version mismatch");
+-static_assert (XDG_SHELL_VERSION_CURRENT == 5, "XDG shell version mismatch");
  
  struct vout_window_sys_t
  {
