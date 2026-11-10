@@ -10,6 +10,8 @@
 #include <string.h>
 #include <signal.h>
 #include <time.h>
+#include <errno.h>
+#include <poll.h>
 #define WIDTH 640
 #define HEIGHT 480
 static struct wl_compositor *compositor;
@@ -21,6 +23,8 @@ static struct xdg_toplevel *top;
 static struct wl_buffer *buffer;
 static int configured=0;
 static volatile sig_atomic_t running=1;
+static unsigned long configure_count=0;
+static unsigned long top_configure_count=0;
 static void stop(int sig){(void)sig;running=0;}
 static void registry_global(void *data,struct wl_registry *r,uint32_t name,const char *iface,uint32_t ver){
  (void)data;
@@ -33,18 +37,20 @@ static const struct wl_registry_listener reg_listener={registry_global,registry_
 static void wm_ping(void *d,struct xdg_wm_base *w,uint32_t serial){(void)d;xdg_wm_base_pong(w,serial);}
 static const struct xdg_wm_base_listener wm_listener={wm_ping};
 static void xs_configure(void *d,struct xdg_surface *x,uint32_t serial){
- (void)d;xdg_surface_ack_configure(x,serial);
+ (void)d;
+ fprintf(stderr,"WAYLAND_CALLBACK xdg_surface.configure serial=%u count=%lu\\n",serial,++configure_count);xdg_surface_ack_configure(x,serial);
  wl_surface_attach(surface,buffer,0,0);
  wl_surface_damage(surface,0,0,WIDTH,HEIGHT);
  wl_surface_commit(surface);
+ fprintf(stderr,"WAYLAND_SURFACE_COMMIT buffer_attached=1\\n");
  configured=1;
  puts("WAYLAND_XDG_CONFIGURED");fflush(stdout);
 }
 static const struct xdg_surface_listener xs_listener={xs_configure};
-static void top_configure(void *d,struct xdg_toplevel *t,int32_t w,int32_t h,struct wl_array *states){(void)d;(void)t;(void)w;(void)h;(void)states;}
-static void top_close(void *d,struct xdg_toplevel *t){(void)d;(void)t;running=0;}
-static void top_bounds(void *d,struct xdg_toplevel *t,int32_t w,int32_t h){(void)d;(void)t;printf("WAYLAND_TOPLEVEL_BOUNDS %d %d\\n",w,h);fflush(stdout);}
-static void top_capabilities(void *d,struct xdg_toplevel *t,struct wl_array *caps){(void)d;(void)t;(void)caps;}
+static void top_configure(void *d,struct xdg_toplevel *t,int32_t w,int32_t h,struct wl_array *states){(void)d;(void)t;(void)states;fprintf(stderr,"WAYLAND_CALLBACK xdg_toplevel.configure count=%lu size=%dx%d\\n",++top_configure_count,w,h);}
+static void top_close(void *d,struct xdg_toplevel *t){(void)d;(void)t;fprintf(stderr,"WAYLAND_CALLBACK xdg_toplevel.close\\n");running=0;}
+static void top_bounds(void *d,struct xdg_toplevel *t,int32_t w,int32_t h){(void)d;(void)t;fprintf(stderr,"WAYLAND_CALLBACK xdg_toplevel.configure_bounds %d %d\\n",w,h);fflush(stdout);}
+static void top_capabilities(void *d,struct xdg_toplevel *t,struct wl_array *caps){(void)d;(void)t;(void)caps;fprintf(stderr,"WAYLAND_CALLBACK xdg_toplevel.wm_capabilities\\n");}
 static const struct xdg_toplevel_listener top_listener={
  .configure=top_configure,
  .close=top_close,
@@ -86,7 +92,23 @@ int main(void){
  puts("WAYLAND_WINDOW_REQUESTED");fflush(stdout);
  /* Keep the event loop alive until closed or externally terminated. */
  int dispatch_result=0;
- while(running && (dispatch_result=wl_display_dispatch(display))>=0){}
+ /* A bounded poll ensures SIGTERM does not leave us blocked inside dispatch.
+    It also records compositor errors instead of losing them in a crash. */
+ while(running){
+  dispatch_result=wl_display_dispatch_pending(display);
+  if(dispatch_result<0) break;
+  if(!running) break;
+  if(wl_display_flush(display)<0 && errno!=EAGAIN){dispatch_result=-1;break;}
+  struct pollfd pfd={.fd=wl_display_get_fd(display),.events=POLLIN};
+  int ready=poll(&pfd,1,250);
+  if(ready<0){if(errno==EINTR)continue;perror("poll");dispatch_result=-1;break;}
+  if(!ready)continue;
+  if(pfd.revents & (POLLERR|POLLHUP|POLLNVAL)){
+   fprintf(stderr,"WAYLAND_SOCKET_EVENTS revents=0x%x\\n",pfd.revents);
+  }
+  dispatch_result=wl_display_dispatch(display);
+  if(dispatch_result<0)break;
+ }
  if(dispatch_result<0){
   int err=wl_display_get_error(display);
   const struct wl_interface *iface=NULL;
@@ -94,6 +116,9 @@ int main(void){
   uint32_t protocol=wl_display_get_protocol_error(display,&iface,&object_id);
   fprintf(stderr,"WAYLAND_DISPATCH_ERROR errno=%d protocol=%u interface=%s object=%u\\n",err,protocol,iface?iface->name:"none",object_id);
  }
- printf("WAYLAND_WINDOW_EXIT configured=%d\n",configured);
+ fprintf(stderr,"WAYLAND_WINDOW_EXIT configured=%d xdg_configures=%lu toplevel_configures=%lu\\n",configured,configure_count,top_configure_count);
+ fflush(stderr);
+ /* The OS releases the remaining Wayland objects at process exit; avoid
+    racing a compositor teardown after timeout sends SIGTERM. */
  return configured?0:8;
 }
