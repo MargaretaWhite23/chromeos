@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/vlc-chromeos.yml'
       - 'scripts/build-vlc-alpine.sh'
+      - 'scripts/vlc-stable-xdg-shell.patch'
 
 permissions:
   contents: read
