@@ -28,7 +28,7 @@ jobs:
           ldd build/native-wayland-window
           cp build/native-wayland-window package/
           # Bundle the Alpine musl loader and every resolved shared-library dependency.
-          lddtree -l build/native-wayland-window | sort -u | while IFS= read -r lib; do
+          { printf '%s\n' /lib/ld-musl-x86_64.so.1; ldd build/native-wayland-window | awk '{for (i=1;i<=NF;i++) if ($i ~ /^\//) print $i}'; } | sort -u | while IFS= read -r lib; do
             test -f "$lib" || continue
             mkdir -p "package$(dirname "$lib")"
             cp -L "$lib" "package$lib"
