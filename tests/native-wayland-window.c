@@ -43,7 +43,14 @@ static void xs_configure(void *d,struct xdg_surface *x,uint32_t serial){
 static const struct xdg_surface_listener xs_listener={xs_configure};
 static void top_configure(void *d,struct xdg_toplevel *t,int32_t w,int32_t h,struct wl_array *states){(void)d;(void)t;(void)w;(void)h;(void)states;}
 static void top_close(void *d,struct xdg_toplevel *t){(void)d;(void)t;running=0;}
-static const struct xdg_toplevel_listener top_listener={top_configure,top_close};
+static void top_bounds(void *d,struct xdg_toplevel *t,int32_t w,int32_t h){(void)d;(void)t;printf("WAYLAND_TOPLEVEL_BOUNDS %d %d\\n",w,h);fflush(stdout);}
+static void top_capabilities(void *d,struct xdg_toplevel *t,struct wl_array *caps){(void)d;(void)t;(void)caps;}
+static const struct xdg_toplevel_listener top_listener={
+ .configure=top_configure,
+ .close=top_close,
+ .configure_bounds=top_bounds,
+ .wm_capabilities=top_capabilities
+};
 int main(void){
  signal(SIGTERM,stop);signal(SIGINT,stop);
  struct wl_display *display=wl_display_connect(NULL);
@@ -78,7 +85,15 @@ int main(void){
  wl_surface_commit(surface);
  puts("WAYLAND_WINDOW_REQUESTED");fflush(stdout);
  /* Keep the event loop alive until closed or externally terminated. */
- while(running && wl_display_dispatch(display)>=0){}
+ int dispatch_result=0;
+ while(running && (dispatch_result=wl_display_dispatch(display))>=0){}
+ if(dispatch_result<0){
+  int err=wl_display_get_error(display);
+  const struct wl_interface *iface=NULL;
+  uint32_t object_id=0;
+  uint32_t protocol=wl_display_get_protocol_error(display,&iface,&object_id);
+  fprintf(stderr,"WAYLAND_DISPATCH_ERROR errno=%d protocol=%u interface=%s object=%u\\n",err,protocol,iface?iface->name:"none",object_id);
+ }
  printf("WAYLAND_WINDOW_EXIT configured=%d\n",configured);
  return configured?0:8;
 }
