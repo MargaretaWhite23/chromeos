@@ -21,6 +21,7 @@ static struct wl_surface *surface;
 static struct xdg_surface *xs;
 static struct xdg_toplevel *top;
 static struct wl_buffer *buffer;
+static int frame_done;
 static int configured=0;
 static volatile sig_atomic_t running=1;
 static unsigned long configure_count=0;
@@ -36,9 +37,22 @@ static void registry_remove(void *d,struct wl_registry *r,uint32_t name){(void)d
 static const struct wl_registry_listener reg_listener={registry_global,registry_remove};
 static void wm_ping(void *d,struct xdg_wm_base *w,uint32_t serial){(void)d;xdg_wm_base_pong(w,serial);}
 static const struct xdg_wm_base_listener wm_listener={wm_ping};
+static void frame_complete(void *data, struct wl_callback *callback, uint32_t timestamp)
+{
+ (void)data;
+ fprintf(stderr, "WAYLAND_FRAME_DONE timestamp=%u\n", timestamp);
+ frame_done=1;
+ wl_callback_destroy(callback);
+}
+static const struct wl_callback_listener frame_listener={frame_complete};
+
 static void xs_configure(void *d,struct xdg_surface *x,uint32_t serial){
  (void)d;
  fprintf(stderr,"WAYLAND_CALLBACK xdg_surface.configure serial=%u count=%lu\\n",serial,++configure_count);xdg_surface_ack_configure(x,serial);
+ if(!configured){
+  struct wl_callback *frame=wl_surface_frame(surface);
+  if(frame) wl_callback_add_listener(frame,&frame_listener,NULL);
+ }
  wl_surface_attach(surface,buffer,0,0);
  wl_surface_damage(surface,0,0,WIDTH,HEIGHT);
  wl_surface_commit(surface);
@@ -90,24 +104,50 @@ int main(void){
  xdg_toplevel_set_app_id(top,"native-wayland-test");
  wl_surface_commit(surface);
  puts("WAYLAND_WINDOW_REQUESTED");fflush(stdout);
- /* Keep the event loop alive until closed or externally terminated. */
+ /* Keep the diagnostic window open for up to five seconds. */
+ struct timespec now;
  int dispatch_result=0;
- /* A bounded poll ensures SIGTERM does not leave us blocked inside dispatch.
-    It also records compositor errors instead of losing them in a crash. */
+ if(clock_gettime(CLOCK_MONOTONIC,&now)<0){
+  perror("clock_gettime");
+  wl_display_disconnect(display);
+  munmap(pixels,bytes);
+  return 9;
+ }
+ const time_t deadline=now.tv_sec+5;
+ const long deadline_ns=now.tv_nsec;
  while(running){
-  dispatch_result=wl_display_dispatch_pending(display);
-  if(dispatch_result<0) break;
-  if(!running) break;
-  if(wl_display_flush(display)<0 && errno!=EAGAIN){dispatch_result=-1;break;}
-  struct pollfd pfd={.fd=wl_display_get_fd(display),.events=POLLIN};
-  int ready=poll(&pfd,1,250);
-  if(ready<0){if(errno==EINTR)continue;perror("poll");dispatch_result=-1;break;}
-  if(!ready)continue;
-  if(pfd.revents & (POLLERR|POLLHUP|POLLNVAL)){
-   fprintf(stderr,"WAYLAND_SOCKET_EVENTS revents=0x%x\\n",pfd.revents);
+  if(clock_gettime(CLOCK_MONOTONIC,&now)<0){dispatch_result=-1;break;}
+  if(now.tv_sec>deadline || (now.tv_sec==deadline && now.tv_nsec>=deadline_ns)) break;
+
+  if(wl_display_prepare_read(display)<0){
+   dispatch_result=wl_display_dispatch_pending(display);
+   if(dispatch_result<0) break;
+   continue;
   }
-  dispatch_result=wl_display_dispatch(display);
-  if(dispatch_result<0)break;
+  struct pollfd pfd={.fd=wl_display_get_fd(display),.events=POLLIN};
+  if(wl_display_flush(display)<0){
+   if(errno!=EAGAIN){
+    wl_display_cancel_read(display);
+    dispatch_result=-1;
+    break;
+   }
+   pfd.events|=POLLOUT;
+  }
+  int ready=poll(&pfd,1,100);
+  int poll_error=errno;
+  if(ready>0 && (pfd.revents & POLLIN)){
+   dispatch_result=wl_display_read_events(display);
+   if(dispatch_result<0) break;
+   dispatch_result=wl_display_dispatch_pending(display);
+   if(dispatch_result<0) break;
+  }else{
+   wl_display_cancel_read(display);
+   if((ready<0 && poll_error!=EINTR) ||
+      (ready>0 && (pfd.revents & (POLLERR|POLLHUP|POLLNVAL)))){
+    dispatch_result=-1;
+    break;
+   }
+  }
  }
  if(dispatch_result<0){
   int err=wl_display_get_error(display);
@@ -116,9 +156,9 @@ int main(void){
   uint32_t protocol=wl_display_get_protocol_error(display,&iface,&object_id);
   fprintf(stderr,"WAYLAND_DISPATCH_ERROR errno=%d protocol=%u interface=%s object=%u\\n",err,protocol,iface?iface->name:"none",object_id);
  }
- fprintf(stderr,"WAYLAND_WINDOW_EXIT configured=%d xdg_configures=%lu toplevel_configures=%lu\\n",configured,configure_count,top_configure_count);
- fflush(stderr);
- /* The OS releases the remaining Wayland objects at process exit; avoid
-    racing a compositor teardown after timeout sends SIGTERM. */
- return configured?0:8;
+ wl_display_disconnect(display);
+ munmap(pixels,bytes);
+ fprintf(stderr,"WAYLAND_WINDOW_EXIT configured=%d frame_done=%d xdg_configures=%lu toplevel_configures=%lu\n",
+         configured,frame_done,configure_count,top_configure_count);
+ return dispatch_result<0?9:configured?0:8;
 }
